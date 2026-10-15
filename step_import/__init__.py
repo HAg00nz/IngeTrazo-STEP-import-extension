@@ -35,6 +35,16 @@ CONFIRM_TRIANGLES = 1_000_000
 
 _SETTINGS_ANGLE = "step_import/max_angle"
 _SETTINGS_MERGE = "step_import/merge_coplanar"
+_SETTINGS_UP = "step_import/up_axis"
+
+#: World rotation from the STEP file's frame to IngeTrazo's (Z up). STEP is
+#: Z up by convention and cascadio writes the GLB without converting it to
+#: glTF's Y up, so "z" is the identity; "y" is for exporters that model
+#: with Y up.
+UP_AXES = {
+    "z": ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+    "y": ((1.0, 0.0, 0.0), (0.0, 0.0, -1.0), (0.0, 1.0, 0.0)),
+}
 
 
 def _cascadio():
@@ -58,7 +68,7 @@ def _srgb(c: float) -> float:
     return 1.055 * c ** (1 / 2.4) - 0.055
 
 
-def _read_parts(glb: Path):
+def _read_parts(glb: Path, up_axis: str = "z"):
     """``[(name, batches)]``, one entry per glTF node with geometry, in
     world space, metres, Z up. ``batches`` is what ``formats.glb.build_mesh``
     takes."""
@@ -67,7 +77,7 @@ def _read_parts(glb: Path):
                              parse_container)
 
     js, buffers = parse_container(glb)
-    zup = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+    up = np.array(UP_AXES[up_axis])
     nodes, meshes = js.get("nodes", []), js.get("meshes", [])
     parts = []
     for node_idx, world in _node_transforms(js):
@@ -92,7 +102,7 @@ def _read_parts(glb: Path):
                 js, prim.get("material"), [])
             if rgba:
                 rgba = [_srgb(c) for c in rgba[:3]] + list(rgba[3:4])
-            pts = (pos @ world[:3, :3].T + world[:3, 3]) @ zup.T
+            pts = (pos @ world[:3, :3].T + world[:3, 3]) @ up.T
             batches.append((pts[idx], None, (None, rgba, opacity)))
         if batches:
             name = (nd.get("name") or meshes[mi].get("name")
@@ -101,7 +111,8 @@ def _read_parts(glb: Path):
     return parts
 
 
-def tessellate(path, max_angle: float = DEFAULT_ANGLE, progress=None):
+def tessellate(path, max_angle: float = DEFAULT_ANGLE, up_axis: str = "z",
+               progress=None):
     """STEP → ``(parts, triangle count)``; see :func:`_read_parts`.
     Worker-thread safe."""
     if progress is not None:
@@ -117,7 +128,7 @@ def tessellate(path, max_angle: float = DEFAULT_ANGLE, progress=None):
             raise ValueError(f"OpenCASCADE could not read {Path(path).name}")
         if progress is not None:
             progress(0.3, "Reading triangles…")
-        parts = _read_parts(glb)
+        parts = _read_parts(glb, up_axis)
     if not parts:
         raise ValueError(f"{Path(path).name} contains no solid or surface "
                          "geometry")
@@ -146,9 +157,10 @@ def build_parts(parts, merge_coplanar: bool = True, progress=None):
 
 
 def parse_step(path, max_angle: float = DEFAULT_ANGLE,
-               merge_coplanar: bool = True, progress=None):
+               merge_coplanar: bool = True, up_axis: str = "z",
+               progress=None):
     """Read the STEP at ``path`` into ``[(part name, Mesh)]``."""
-    parts, _count = tessellate(path, max_angle, progress)
+    parts, _count = tessellate(path, max_angle, up_axis, progress)
     return build_parts(parts, merge_coplanar, progress)
 
 
@@ -221,9 +233,9 @@ def _run_threaded(window, fn, cb):
 
 
 def _ask_options(window):
-    """``(max angle, merge coplanar)``; None when cancelled."""
+    """``(max angle, merge coplanar, up axis)``; None when cancelled."""
     from PySide6.QtCore import QSettings, Qt
-    from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox,
+    from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                                    QFormLayout, QHBoxLayout, QLabel, QSlider,
                                    QWidget)
     from core.i18n import tr
@@ -273,6 +285,15 @@ def _ask_options(window):
     describe(start)
     form.addRow("", shown)
 
+    up = QComboBox(dialog)
+    up.addItem(tr("Z (STEP standard)"), "z")
+    up.addItem(tr("Y (some CAD exporters)"), "y")
+    idx = up.findData(str(settings.value(_SETTINGS_UP, "z")))
+    up.setCurrentIndex(idx if idx >= 0 else 0)
+    up.setToolTip(tr("Which axis of the file points up. Pick Y if the "
+                     "model comes in lying on its side."))
+    form.addRow(tr("Up axis"), up)
+
     merge = QCheckBox(tr("Merge coplanar triangles into one face"), dialog)
     merge.setToolTip(tr("Flat CAD faces become one face you can push/pull. "
                         "Takes longer on big models."))
@@ -289,7 +310,8 @@ def _ask_options(window):
     angle = MAX_ANGLES[slider.value()]
     settings.setValue(_SETTINGS_ANGLE, angle)
     settings.setValue(_SETTINGS_MERGE, merge.isChecked())
-    return angle, merge.isChecked()
+    settings.setValue(_SETTINGS_UP, up.currentData())
+    return angle, merge.isChecked(), up.currentData()
 
 
 def _confirm_heavy(window, count) -> bool:
@@ -322,7 +344,7 @@ def import_step(app, path=None) -> bool:
     options = _ask_options(window)
     if options is None:
         return False
-    max_angle, merge_coplanar = options
+    max_angle, merge_coplanar, up_axis = options
 
     def fail(dlg, exc):
         dlg.close()
@@ -332,7 +354,7 @@ def import_step(app, path=None) -> bool:
     title = tr("Importing {name}…", name=path.name)
     dlg, cb = window._import_progress(title)
     tess, exc = _run_threaded(
-        window, lambda p: tessellate(path, max_angle, p), cb)
+        window, lambda p: tessellate(path, max_angle, up_axis, p), cb)
     if exc is not None:
         return fail(dlg, exc)
     parts, count = tess

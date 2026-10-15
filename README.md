@@ -7,7 +7,8 @@ Import STEP CAD models (`.step` / `.stp`, AP203 / AP214 / AP242) into
 - The file lands as one group named after the file, with one named group
   per CAD part inside, as one undo step.
 - Part colours come from the STEP file. Units are read from it too and
-  converted to metres.
+  converted to metres. Z is up, as STEP files are; *Up axis ▸ Y* is for
+  models exported with Y up.
 - *Curve resolution* is the largest angle between neighbouring facets of a
   curved surface, from 45° (coarse) to 3° (fine). IngeTrazo hides the edges
   between facets flatter than ~32°, so at 30° and finer curves look smooth;
@@ -39,7 +40,7 @@ For Windows or macOS, fetch the matching wheel, e.g.
 ## Check
 
 ```sh
-scripts/smoke.sh part.step [max angle in degrees, default 20]
+scripts/smoke.sh part.step [max angle, default 20] [up axis z|y]
 ```
 
 Parses the file headlessly with the installed IngeTrazo Flatpak and prints

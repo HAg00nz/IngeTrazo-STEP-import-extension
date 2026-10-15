@@ -1,10 +1,10 @@
 #!/usr/bin/env sh
 # Headless check: parse STEP files with the installed IngeTrazo Flatpak.
-#   scripts/smoke.sh part.step [max angle in degrees, default 20]
+#   scripts/smoke.sh part.step [max angle, default 20] [up axis z|y]
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FILE="$(realpath "$1")"
-flatpak run --filesystem="$(dirname "$FILE")":ro --command=python3 com.ingetrazo.IngeTrazo - "$ROOT" "$FILE" "${2:-20}" <<'PY'
+flatpak run --filesystem="$(dirname "$FILE")":ro --command=python3 com.ingetrazo.IngeTrazo - "$ROOT" "$FILE" "${2:-20}" "${3:-z}" <<'PY'
 import importlib.util, sys, time
 root, path, angle = sys.argv[1:4]
 sys.path.insert(0, "/app/ingetrazo")
@@ -13,7 +13,7 @@ spec = importlib.util.spec_from_file_location(
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 t = time.time()
-parts = mod.parse_step(path, float(angle))
+parts = mod.parse_step(path, float(angle), up_axis=(sys.argv[4] if len(sys.argv) > 4 else "z"))
 faces = [f for _n, m in parts for f in m.faces]
 xs = [c for f in faces for v in f.vertices for c in (v.x(), v.y(), v.z())]
 ext = [max(xs[i::3]) - min(xs[i::3]) for i in range(3)]
