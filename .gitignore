@@ -1,3 +1,22 @@
+# Vendored cascadio wheel, fetched by scripts/fetch-vendor.sh (~27 MB,
+# platform specific)
 step_import/_vendor/
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Local test runs (probe scripts, converted models, screenshots)
+.probe*
+*.glb
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
